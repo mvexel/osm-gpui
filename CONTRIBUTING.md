@@ -113,6 +113,10 @@ Dragging a node needs it to be the only thing moved: a press on an unselected ve
 
 **Presets.** The iD tagging schema data in `assets/presets/` is refreshed with `cargo run --example update_presets [-- <schema-version>]` (default: the version in `assets/presets/LICENSE`), which also fetches the referenced preset icons from the upstream releases pinned in the example. It is not part of CI; review the resulting diff by hand.
 
+## Extensions
+
+Extensions are sandboxed WebAssembly components the app loads at runtime (`src/extensions`, `src/extensions_ui.rs`, `src/extensions_manage.rs`). The interface is `crates/osm-gpui-extension-api/wit/extension.wit`; [docs/extensions.md](docs/extensions.md) is the guide for writing one. `extensions/maproulette` is the reference extension, and the host's tests build it, so `cargo test` needs the wasm target (`rustup target add wasm32-wasip2`). Released API versions never break: a change to the WIT is a new API version, and the previous ones keep running through adapters (`src/extensions/runtime/v0_1.rs`) generated from their frozen WIT (`src/extensions/wit/`). The steps are in [docs/extensions.md](docs/extensions.md#changing-the-api), and `released_api_versions_never_change` enforces them.
+
 ## Translations
 
 osm-gpui is available in English and German. English is the source language and the fallback for anything a catalog lacks. The German text is machine-drafted and has not been reviewed by a native speaker, so corrections and new languages are especially welcome and need no Rust knowledge.

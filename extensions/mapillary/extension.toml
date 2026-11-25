@@ -1,0 +1,21 @@
+id = "mapillary"
+name = "Mapillary"
+version = "0.2.0"
+schema_version = 1
+authors = ["Ian Dees"]
+description = "Street-level photos from Mapillary on the map, with the photo and its details in the side panel. Needs a Mapillary access token."
+repository = "https://github.com/iandees/osm-gpui"
+subscribe = ["viewport"]
+
+[capabilities]
+# Tiles (tiles.mapillary.com) and photo details (graph.mapillary.com); the
+# pictures themselves are served from Meta's CDN.
+http = ["mapillary.com", "fbcdn.net"]
+# The access token lives in the system keychain.
+secrets = true
+
+[[commands]]
+id = "photos"
+label = "Mapillary Photos"
+menu = "overlays"
+toggle = true

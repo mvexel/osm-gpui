@@ -74,7 +74,10 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev \
             libssl-dev libzstd-dev libvulkan1 libdrm-dev libgbm-dev
 
+      # The extension host's tests build extensions/maproulette for wasm.
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
 
       # Restores from this ref, else from main; saves when nothing matched.
       - uses: Swatinem/rust-cache@v2
@@ -84,6 +87,15 @@ jobs:
       - name: cargo test
         run: cargo test --locked
 
+      # The extensions (and the crate they share) are crates of their own,
+      # outside the app's workspace: run their native unit tests too.
+      - name: extension tests
+        run: |
+          for manifest in extensions/*/Cargo.toml; do
+            echo "== $manifest"
+            cargo test --locked --manifest-path "$manifest"
+          done
+
   # macOS is the primary platform; verify it after merge rather than on every PR push.
   macos:
     if: github.event_name == 'push'
@@ -92,6 +104,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
 
       - uses: Swatinem/rust-cache@v2
         with:

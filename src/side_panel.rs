@@ -103,6 +103,7 @@ impl MapViewer {
                 open: self.side_panel_open[0],
                 content: rows(layer_info.len()),
             },
+            self.todo_want(),
             self.validation_want(),
             layout::Want {
                 open: self.side_panel_open[HISTORY_SECTION],
@@ -117,6 +118,7 @@ impl MapViewer {
         let history_section = self.render_history_section(plan.history, cx);
         let validation_section =
             self.render_validation_section(plan.validation.unwrap_or_default(), cx);
+        let todo_section = self.render_todo_section(plan.todo.unwrap_or_default(), cx);
         let relations_section = self.render_relations_section(cx);
         let open_relations = self.side_panel_open[5];
         let members_section = self.render_members_section(window, cx);
@@ -150,16 +152,18 @@ impl MapViewer {
         // An open note takes the Selection zone's place.
         let note_section = self
             .render_note_section(cx)
-            .or_else(|| self.render_photo_section(cx))
             .or_else(|| self.render_vector_feature_section(cx));
         let note_open = note_section.is_some();
-        let object_photos = self.render_object_photos_section(cx);
+        // Extension panels: sections of their own after the selection's.
+        let extension_panels = self.render_extension_panels(cx);
+        let extensions_shown = !extension_panels.is_empty();
         let (note_title, note_status, note_body) = match note_section {
             Some((title, status, body)) => (Some(title), Some(status), Some(body)),
             None => (None, None, None),
         };
         let selection_title = match (note_title, self.selected.len()) {
             (Some(title), _) => title,
+            (None, 0) if extensions_shown => tr!("panel.extensions.title"),
             (None, 0 | 1) => tr!("panel.selection.title"),
             (None, n) => tr_count!("panel.selection.title_count", n),
         };
@@ -261,28 +265,33 @@ impl MapViewer {
                                     // of empty Fields and Tags sections.
                                     .children(scrolled_header)
                                     .children(note_body)
-                                    .when(selected_count == 0 && !note_open, |group| {
-                                        group.child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .items_center()
-                                                .gap_1()
-                                                .px_4()
-                                                .py_6()
-                                                .child(
-                                                    Label::new(tr!("panel.selection.nothing"))
-                                                        .text_color(muted),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_size(muted_text_size())
-                                                        .text_color(muted)
-                                                        .text_center()
-                                                        .child(tr!("panel.selection.nothing_hint")),
-                                                ),
-                                        )
-                                    })
+                                    .when(
+                                        selected_count == 0 && !note_open && !extensions_shown,
+                                        |group| {
+                                            group.child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .items_center()
+                                                    .gap_1()
+                                                    .px_4()
+                                                    .py_6()
+                                                    .child(
+                                                        Label::new(tr!("panel.selection.nothing"))
+                                                            .text_color(muted),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_size(muted_text_size())
+                                                            .text_color(muted)
+                                                            .text_center()
+                                                            .child(tr!(
+                                                                "panel.selection.nothing_hint"
+                                                            )),
+                                                    ),
+                                            )
+                                        },
+                                    )
                                     .when(selected_count > 0 && !note_open, |group| {
                                         group
                                             .when(selected_count > 1, |group| {
@@ -319,7 +328,6 @@ impl MapViewer {
                                                     cx,
                                                 )
                                             }))
-                                            .children(object_photos)
                                             .child(self.collapsible_section(
                                                 tr!("panel.tags.title"),
                                                 3,
@@ -345,12 +353,15 @@ impl MapViewer {
                                                     cx,
                                                 )
                                             }))
-                                    }),
+                                    })
+                                    .children(extension_panels),
                             ),
                     ),
             )
             // Validation, only after a validation was run: directly above
             // History, and like it able to shrink to its header.
+            // The to-do list, then Validation: both only when shown.
+            .children(todo_section)
             .children(validation_section)
             // Pinned to the bottom. It is the only zone besides the
             // selection and Validation that may shrink (to its header) when
@@ -923,8 +934,10 @@ impl MapViewer {
         // like the selection: their headers are full-width tinted strips (see
         // `zone_strip`). Sections inside the selection zone keep the plain
         // header and a hairline.
-        let document_level =
-            index == 0 || index == HISTORY_SECTION || index == crate::validation_panel::SECTION;
+        let document_level = index == 0
+            || index == HISTORY_SECTION
+            || index == crate::validation_panel::SECTION
+            || index == crate::todo_ui::SECTION;
         let title_label = if document_level {
             Label::new(title)
                 .text_size(muted_text_size())
@@ -983,9 +996,11 @@ impl MapViewer {
                     div()
                         // Validation may shrink in a short window: its body
                         // gives up height too, and its list scrolls.
-                        .when(index == crate::validation_panel::SECTION, |this| {
-                            this.flex().flex_col().flex_shrink(1.).min_h(px(0.))
-                        })
+                        .when(
+                            index == crate::validation_panel::SECTION
+                                || index == crate::todo_ui::SECTION,
+                            |this| this.flex().flex_col().flex_shrink(1.).min_h(px(0.)),
+                        )
                         .when(document_level, |this| this.px_2())
                         // The junction diagram runs edge to edge; its text
                         // rows carry the usual inset themselves.

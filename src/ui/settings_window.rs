@@ -38,6 +38,8 @@ enum LoginState {
 /// `Action` types that only the binary crate (`src/main.rs`/`src/menu.rs`)
 /// has access to.
 pub enum SettingsEvent {
+    /// The close button or Escape.
+    Closed,
     KeybindingsChanged,
     /// The active MapCSS style changed (`style::custom::set_active` has
     /// already run); open layers must be restyled.
@@ -184,15 +186,18 @@ pub enum SettingsPage {
     /// Custom imagery sources, the street-imagery tokens and the tile cache.
     Imagery,
     Shortcuts,
+    /// Installed and available extensions, and each one's own settings.
+    Extensions,
 }
 
 impl SettingsPage {
-    pub const ALL: [SettingsPage; 5] = [
+    pub const ALL: [SettingsPage; 6] = [
         Self::Account,
         Self::Appearance,
         Self::Editing,
         Self::Imagery,
         Self::Shortcuts,
+        Self::Extensions,
     ];
 
     /// Position of this page in the window's page list.
@@ -210,6 +215,7 @@ impl SettingsPage {
             Self::Editing => "settings.editing.title",
             Self::Imagery => "settings.imagery.title",
             Self::Shortcuts => "settings.shortcuts.title",
+            Self::Extensions => "settings.extensions.title",
         }
     }
 
@@ -250,6 +256,8 @@ impl PageSelection {
 }
 
 pub struct SettingsWindow {
+    /// The Extensions page's content, from the app.
+    extensions: Option<Entity<crate::ui::extensions_page::ExtensionsPage>>,
     /// Used for sign-in and for fetching a custom map style; the window is
     /// opened from a global action, so it takes the installed default client.
     http: Arc<dyn crate::http::HttpClient>,
@@ -272,8 +280,6 @@ pub struct SettingsWindow {
     cache_budget_error: Option<SharedString>,
     edit_simplify_tolerance: Entity<InputState>,
     simplify_tolerance_error: Option<SharedString>,
-    edit_mapillary_token: Entity<InputState>,
-    edit_fotoshi_key: Entity<InputState>,
     cache_clear_error: Option<SharedString>,
     map_style_input: Entity<InputState>,
     map_style_error: Option<SharedString>,
@@ -320,27 +326,19 @@ impl SettingsWindow {
                 .placeholder("3")
                 .default_value(app_settings.simplify_tolerance().to_string())
         });
-        let edit_mapillary_token = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("MLY|…")
-                .default_value(
-                    crate::secrets::get(crate::secrets::MAPILLARY_TOKEN).unwrap_or_default(),
-                )
-        });
-        let edit_fotoshi_key = cx.new(|cx| {
-            InputState::new(window, cx).default_value(
-                crate::secrets::get(crate::secrets::FOTOSHI_API_KEY).unwrap_or_default(),
-            )
-        });
         let map_style_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr!("settings.map_style.placeholder"))
         });
         let login_state = Self::current_login_state(&app_settings);
+        // Like every in-window dialog, take the focus so Escape reaches it.
+        let focus_handle = cx.focus_handle();
+        window.focus(&focus_handle, cx);
 
         Self {
+            extensions: None,
             http: crate::http::default_client(),
             page: PageSelection::new(start_page),
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             entries: custom_imagery_store::load(),
             editing_index: None,
             confirm_delete_index: None,
@@ -358,8 +356,6 @@ impl SettingsWindow {
             cache_budget_error: None,
             edit_simplify_tolerance,
             simplify_tolerance_error: None,
-            edit_mapillary_token,
-            edit_fotoshi_key,
             cache_clear_error: None,
             map_style_input,
             map_style_error: None,
@@ -580,26 +576,6 @@ impl SettingsWindow {
                 s.client_ids.insert(oauth_base, client_id);
             }
         });
-        cx.notify();
-    }
-
-    /// Store the Fotoshi API key typed into its field.
-    fn save_fotoshi_key(&mut self, cx: &mut Context<Self>) {
-        let raw = self.edit_fotoshi_key.read(cx).value().to_string();
-        crate::secrets::set(crate::secrets::FOTOSHI_API_KEY, &raw);
-        cx.notify();
-    }
-
-    /// Turn the per-feature Fotoshi lookup on or off.
-    fn set_fotoshi_lookup(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.commit(|s| s.fotoshi_lookup_selected = on);
-        cx.notify();
-    }
-
-    /// Store the Mapillary access token typed into its field.
-    fn save_mapillary_token(&mut self, cx: &mut Context<Self>) {
-        let raw = self.edit_mapillary_token.read(cx).value().to_string();
-        crate::secrets::set(crate::secrets::MAPILLARY_TOKEN, &raw);
         cx.notify();
     }
 
@@ -884,6 +860,7 @@ impl SettingsWindow {
                 SettingsPage::Editing => self.editing_page(view.clone()),
                 SettingsPage::Imagery => self.imagery_page(view.clone()),
                 SettingsPage::Shortcuts => self.shortcuts_page(view.clone()),
+                SettingsPage::Extensions => self.extensions_page(),
             })
             .collect()
     }
@@ -1362,83 +1339,8 @@ impl SettingsWindow {
                 SettingGroup::new()
                     .title(tr!("settings.imagery.custom_sources"))
                     .items(items),
-                self.street_imagery_group(view.clone()),
                 self.cache_group(view),
             ])
-    }
-
-    /// The street-imagery group: the Mapillary access token.
-    fn street_imagery_group(&self, view: Entity<Self>) -> SettingGroup {
-        let token_view = view.clone();
-        let token_input = self.edit_mapillary_token.clone();
-        let token_item = SettingItem::new(
-            tr!("settings.street_imagery.mapillary_token"),
-            SettingField::render(move |_options, _window, cx| {
-                let muted = cx.theme().muted_foreground;
-                let view = token_view.clone();
-                v_flex()
-                    .gap_2()
-                    .child(field_row(
-                        tr!("settings.street_imagery.mapillary_token"),
-                        &token_input,
-                        muted,
-                    ))
-                    .child(
-                        Button::new("save-mapillary-token")
-                            .label(tr!("settings.save"))
-                            .primary()
-                            .compact()
-                            .on_click(move |_ev, _window, cx| {
-                                view.update(cx, |this, cx| this.save_mapillary_token(cx));
-                            }),
-                    )
-            }),
-        )
-        .description(tr!("settings.street_imagery.mapillary_token_description"))
-        .layout(Axis::Vertical);
-        let key_view = view.clone();
-        let key_input = self.edit_fotoshi_key.clone();
-        let key_item = SettingItem::new(
-            tr!("settings.street_imagery.fotoshi_key"),
-            SettingField::render(move |_options, _window, cx| {
-                let muted = cx.theme().muted_foreground;
-                let view = key_view.clone();
-                v_flex()
-                    .gap_2()
-                    .child(field_row(
-                        tr!("settings.street_imagery.fotoshi_key"),
-                        &key_input,
-                        muted,
-                    ))
-                    .child(
-                        Button::new("save-fotoshi-key")
-                            .label(tr!("settings.save"))
-                            .primary()
-                            .compact()
-                            .on_click(move |_ev, _window, cx| {
-                                view.update(cx, |this, cx| this.save_fotoshi_key(cx));
-                            }),
-                    )
-            }),
-        )
-        .description(tr!("settings.street_imagery.fotoshi_key_description"))
-        .layout(Axis::Vertical);
-        let lookup_view = view;
-        let lookup_item = SettingItem::new(
-            tr!("settings.street_imagery.fotoshi_lookup"),
-            SettingField::switch(
-                |_cx: &App| settings_store::snapshot().fotoshi_lookup_selected,
-                move |on: bool, cx: &mut App| {
-                    lookup_view.update(cx, |this, cx| this.set_fotoshi_lookup(on, cx));
-                },
-            ),
-        )
-        .description(tr!("settings.street_imagery.fotoshi_lookup_description"));
-        SettingGroup::new()
-            .title(tr!("settings.street_imagery.group"))
-            .item(token_item)
-            .item(key_item)
-            .item(lookup_item)
     }
 
     fn cache_group(&self, view: Entity<Self>) -> SettingGroup {
@@ -1526,6 +1428,28 @@ impl SettingsWindow {
             .items(items)
     }
 
+    /// The extension manager, which the app owns and gives the window
+    /// ([`SettingsWindow::set_extensions_page`]).
+    fn extensions_page(&self) -> SettingPage {
+        let page = self.extensions.clone();
+        SettingPage::new(SettingsPage::Extensions.title()).group(SettingGroup::new().item(
+            SettingItem::render(move |_options, _window, _cx| match &page {
+                Some(page) => div().w_full().child(page.clone()).into_any_element(),
+                None => div().into_any_element(),
+            }),
+        ))
+    }
+
+    /// Show `page` on the Extensions page.
+    pub fn set_extensions_page(
+        &mut self,
+        page: Entity<crate::ui::extensions_page::ExtensionsPage>,
+        cx: &mut Context<Self>,
+    ) {
+        self.extensions = Some(page);
+        cx.notify();
+    }
+
     fn shortcuts_page(&self, view: Entity<Self>) -> SettingPage {
         let mut groups = Vec::new();
         for category in ShortcutCategory::ALL {
@@ -1591,6 +1515,8 @@ impl Focusable for SettingsWindow {
 }
 
 impl EventEmitter<SettingsEvent> for SettingsWindow {}
+
+impl crate::ui::modal::ModalDialog for SettingsWindow {}
 
 fn render_server_picker(
     api_choice: ApiServerChoice,
@@ -2094,24 +2020,79 @@ fn render_entry_edit_form(
         .into_any_element()
 }
 
+/// The settings card's size in a window of `w` x `h`: most of it, within
+/// limits.
+fn card_size(w: f32, h: f32) -> (f32, f32) {
+    (
+        (w - 96.0).clamp(480.0, 980.0),
+        (h - 96.0).clamp(360.0, 760.0),
+    )
+}
+
 impl Render for SettingsWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .track_focus(&self.focus_handle)
-            .size_full()
-            .bg(cx.theme().background)
+    /// Settings is drawn inside the app's window, over the map: a large
+    /// card on a scrim, closed by its close button or Escape.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let size = window.viewport_size();
+        let (w, h) = card_size(size.width.as_f32(), size.height.as_f32());
+        let settings = {
+            let mut settings = Settings::new(self.page.element_id()).pages(self.setting_pages(cx));
+            if let Some(page) = self.page.start {
+                settings = settings.default_selected_index(SelectIndex {
+                    page_ix: page.index(),
+                    group_ix: None,
+                });
+            }
+            settings
+        };
+        let theme = cx.theme();
+        let card = v_flex()
+            .w(px(w))
+            .h(px(h))
+            .bg(theme.background)
+            .border_1()
+            .border_color(theme.border)
+            .rounded_lg()
+            .shadow_lg()
+            .overflow_hidden()
             .text_size(crate::ui::style::current_text_scale().body)
-            .child({
-                let mut settings =
-                    Settings::new(self.page.element_id()).pages(self.setting_pages(cx));
-                if let Some(page) = self.page.start {
-                    settings = settings.default_selected_index(SelectIndex {
-                        page_ix: page.index(),
-                        group_ix: None,
-                    });
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .px_4()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(theme.foreground)
+                            .child(tr!("settings.window_title")),
+                    )
+                    .child(
+                        Button::new("settings-close")
+                            .ghost()
+                            .icon(IconName::Close)
+                            .tooltip(tr!("dialog.extensions.close"))
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::Closed))),
+                    ),
+            )
+            .child(div().flex_1().min_h(px(0.)).child(settings));
+        crate::ui::modal::scrim(
+            &self.focus_handle,
+            cx.listener(|_, ev: &gpui::KeyDownEvent, _, cx| {
+                if crate::ui::modal::classify_key(ev) == crate::ui::modal::ModalKey::Escape {
+                    cx.emit(SettingsEvent::Closed);
                 }
-                settings
-            })
+            }),
+            // Clicks on the card stay on it.
+            div()
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(card),
+        )
     }
 }
 

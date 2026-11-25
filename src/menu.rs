@@ -1,9 +1,6 @@
 //! Menu bar construction and the free-function menu action handlers.
 
-use gpui::{
-    actions, point, px, size, App, AppContext as _, Bounds, Menu, MenuItem, SystemMenuType,
-    WindowOptions,
-};
+use gpui::{actions, px, App, Menu, MenuItem, SystemMenuType};
 
 use gpui_component::menu::AppMenuBar;
 use gpui_component::{GlobalState, ThemeMode};
@@ -19,9 +16,6 @@ use crate::history_actions::ShowObjectHistory;
 use crate::notes_ui::{NewNote, RefreshNotes, ToggleNotes};
 use crate::pmtiles_ui::AddPmtilesLayer;
 use crate::selection_actions;
-use crate::street_imagery_ui::{
-    RefreshStreetImagery, ToggleFotoshi, ToggleMapillary, TogglePanoramax,
-};
 use crate::{
     with_map_viewer, with_map_viewer_in, AddCustomImagery, AddEsriImagery, AddImageryLayer,
     AddOsmCarto, AddSavedCustomImagery, ApplyNsiPreset, ChangeFeatureType, DeleteSelection,
@@ -31,38 +25,6 @@ use crate::{
     ToggleDebugOverlay, ToggleDownloadedArea, Undo, UploadToOsm, Validate, ZoomIn, ZoomOut,
     ZoomToData, ZoomToSelection, ZoomWindow, IMAGERY_INDEX,
 };
-
-/// The Settings window, once opened. Whether it is still open is read from
-/// the app's window list, not remembered, so closing it any way at all
-/// leaves nothing stale.
-#[derive(Default)]
-struct SettingsWindowSlot(Option<gpui::AnyWindowHandle>);
-
-impl gpui::Global for SettingsWindowSlot {}
-
-/// What asking for Settings does.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum SettingsOpen {
-    /// Open a window, on `page` when one was asked for.
-    New { page: Option<SettingsPage> },
-    /// There is one already: bring it to the front.
-    Focus,
-    /// There is one already and a page was asked for: bring it to the front
-    /// on that page.
-    FocusAndShow { page: SettingsPage },
-}
-
-/// Settings is a single window: open it, or focus the one that exists.
-pub(crate) fn settings_open_decision(
-    already_open: bool,
-    page: Option<SettingsPage>,
-) -> SettingsOpen {
-    match (already_open, page) {
-        (false, page) => SettingsOpen::New { page },
-        (true, Some(page)) => SettingsOpen::FocusAndShow { page },
-        (true, None) => SettingsOpen::Focus,
-    }
-}
 
 pub(crate) fn custom_imagery_snapshot() -> Vec<CustomImageryEntry> {
     custom_imagery_store::snapshot()
@@ -181,79 +143,11 @@ pub(crate) fn open_settings(_: &OpenSettings, cx: &mut App) {
     open_settings_page(None, cx);
 }
 
-/// Open the Settings window on `page` (the first when `None`), or focus it if
-/// it is already open, switching it to `page` when one is given.
+/// Open Settings (inside the main window) on `page`, the first when `None`.
+/// Deferred, like Upload, so the map window is not checked out by the
+/// dispatch that called this.
 pub(crate) fn open_settings_page(page: Option<SettingsPage>, cx: &mut App) {
-    let existing = cx
-        .try_global::<SettingsWindowSlot>()
-        .and_then(|slot| slot.0)
-        .filter(|handle| cx.windows().contains(handle));
-    let page = match settings_open_decision(existing.is_some(), page) {
-        SettingsOpen::Focus => {
-            if let Some(handle) = existing {
-                let _ = handle.update(cx, |_, window, _| window.activate_window());
-            }
-            return;
-        }
-        SettingsOpen::FocusAndShow { page } => {
-            if let Some(handle) = existing {
-                let _ = handle.update(cx, |root, window, cx| {
-                    window.activate_window();
-                    show_settings_page(root, page, cx);
-                });
-            }
-            return;
-        }
-        SettingsOpen::New { page } => page,
-    };
-
-    let settings_window = cx
-        .open_window(
-            WindowOptions {
-                window_bounds: Some(gpui::WindowBounds::Windowed(Bounds {
-                    origin: point(px(200.0), px(200.0)),
-                    size: size(px(600.0), px(500.0)),
-                })),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some(tr!("settings.window_title")),
-                    appears_transparent: false,
-                    traffic_light_position: None,
-                }),
-                focus: true,
-                ..Default::default()
-            },
-            |window, cx| {
-                let view = cx
-                    .new(|cx| osm_gpui::ui::settings_window::SettingsWindow::new(page, window, cx));
-                cx.subscribe(
-                    &view,
-                    |_entity, event: &osm_gpui::ui::settings_window::SettingsEvent, cx| match event
-                    {
-                        osm_gpui::ui::settings_window::SettingsEvent::KeybindingsChanged => {
-                            apply_keybindings_change(&osm_gpui::settings_store::snapshot(), cx);
-                        }
-                        osm_gpui::ui::settings_window::SettingsEvent::MapStyleChanged => {
-                            crate::with_map_viewer(cx, |v, cx| v.apply_map_style(cx));
-                        }
-                    },
-                )
-                .detach();
-                cx.new(|cx| gpui_component::Root::new(view, window, cx))
-            },
-        )
-        .unwrap();
-    cx.set_global(SettingsWindowSlot(Some(settings_window.into())));
-}
-
-/// Switch the open Settings window (whose root view is `root`) to `page`.
-fn show_settings_page(root: gpui::AnyView, page: SettingsPage, cx: &mut App) {
-    let Ok(root) = root.downcast::<gpui_component::Root>() else {
-        return;
-    };
-    let content = root.read(cx).view().clone();
-    if let Ok(settings) = content.downcast::<osm_gpui::ui::settings_window::SettingsWindow>() {
-        settings.update(cx, |settings, cx| settings.show_page(page, cx));
-    }
+    cx.defer(move |cx| with_map_viewer_in(cx, |v, window, cx| v.open_settings(page, window, cx)));
 }
 
 pub(crate) fn download_from_osm(_: &DownloadFromOsm, cx: &mut App) {
@@ -385,10 +279,15 @@ pub(crate) fn add_saved_custom_imagery(action: &AddSavedCustomImagery, cx: &mut 
 
 /// Re-apply the live `gpui` keymap from current settings and refresh the
 /// native menu's shortcut labels, in response to a
-/// `SettingsEvent::KeybindingsChanged` from the Settings window. Menu
-/// shortcut labels are baked in at `cx.set_menus` time (they don't update
-/// on their own), so this always re-triggers a full `rebuild_menus` too.
-fn apply_keybindings_change(settings: &osm_gpui::settings_store::AppSettings, cx: &mut App) {
+/// `SettingsEvent::KeybindingsChanged` from Settings. Menu shortcut labels
+/// are baked in at `cx.set_menus` time (they don't update on their own), so
+/// this always re-triggers a full `rebuild_menus` too.
+pub(crate) fn apply_keybindings_change(cx: &mut App) {
+    replace_app_keybindings(&osm_gpui::settings_store::snapshot(), cx);
+}
+
+/// `apply_keybindings_change` for `settings`.
+fn replace_app_keybindings(settings: &osm_gpui::settings_store::AppSettings, cx: &mut App) {
     let app_bindings = crate::key_bindings_from_settings(settings, cfg!(target_os = "macos"));
     // GPUI's keymap also holds component bindings (input editing, menus,
     // focus traversal, ...). Replace only our actions, keeping the others
@@ -465,10 +364,10 @@ pub(crate) fn rebuild_menus_for_live_viewer(cx: &mut App) {
 pub(crate) struct MenuToggles {
     pub(crate) show_downloaded_area: bool,
     pub(crate) show_notes: bool,
+    /// View > To-do List.
+    pub(crate) show_todo: bool,
     /// The View > Show Labels / POI Icons / Street Names / Area Labels checks.
     pub(crate) labels: osm_gpui::layers::labels::LabelVisibility,
-    /// Indexed by `Provider::index`.
-    pub(crate) show_imagery: [bool; 3],
     pub(crate) can_upload: bool,
 }
 
@@ -478,8 +377,8 @@ impl Default for MenuToggles {
         Self {
             show_downloaded_area: true,
             show_notes: false,
+            show_todo: false,
             labels: Default::default(),
-            show_imagery: [false; 3],
             can_upload: false,
         }
     }
@@ -756,19 +655,48 @@ pub(crate) fn in_window_menu_bar(cx: &App) -> Option<gpui::Entity<AppMenuBar>> {
 /// off macOS, and the rest moves to where Windows and Linux users look for it:
 /// Quit at the end of File, Settings at the end of Edit, About at the end of
 /// Help.
+/// The running extensions' commands for menu location `location` (see
+/// `osm_gpui::extensions::manifest::MENU_LOCATIONS`), with a separator
+/// before them when there are any.
+fn extension_commands(location: &str) -> Vec<MenuItem> {
+    use crate::extensions_ui::RunExtensionCommand;
+    let locale = osm_gpui::i18n::current_locale();
+    let mut items = Vec::new();
+    for ext in crate::extensions_ui::menu_snapshot() {
+        for c in ext.commands.iter().filter(|c| c.location() == location) {
+            let item = MenuItem::action(
+                ext.command_label(c, &locale),
+                RunExtensionCommand {
+                    extension: ext.id.clone(),
+                    command: c.id.clone(),
+                },
+            );
+            items.push(if c.toggle {
+                item.checked(ext.checked.contains(&c.id))
+            } else {
+                item
+            });
+        }
+    }
+    if !items.is_empty() {
+        items.insert(0, MenuItem::separator());
+    }
+    items
+}
+
 fn build_menus(
     is_macos: bool,
     center: LatLon,
     state: ImageryLoadState,
     toggles: MenuToggles,
 ) -> Vec<Menu> {
-    use osm_gpui::street_imagery::Provider;
     let custom = custom_imagery_snapshot();
     let mut custom_items: Vec<MenuItem> = vec![
         MenuItem::action(tr!("menu.imagery.custom_add"), AddCustomImagery),
         MenuItem::action(tr!("menu.imagery.esri_add"), AddEsriImagery),
         MenuItem::action(tr!("menu.imagery.pmtiles_add"), AddPmtilesLayer),
     ];
+    custom_items.extend(extension_commands("imagery"));
     if !custom.is_empty() {
         custom_items.push(MenuItem::separator());
         for (idx, entry) in custom.iter().enumerate() {
@@ -846,12 +774,16 @@ fn build_menus(
         MenuItem::separator(),
         MenuItem::action(tr!("menu.file.download"), DownloadFromOsm),
         MenuItem::action(tr!("gps_traces.menu.download"), DownloadGpsTraces),
+    ];
+    file_items.extend(extension_commands("data"));
+    file_items.extend([
+        MenuItem::separator(),
         MenuItem::action(
             tr!("menu.file.revert_changeset"),
             RevertChangeset::default(),
         ),
         MenuItem::action(tr!("menu.file.upload"), UploadToOsm).disabled(!toggles.can_upload),
-    ];
+    ]);
     let mut edit_tail = vec![];
     let mut help_items = vec![
         MenuItem::action(tr!("menu.help.map_features_wiki"), OpenMapFeaturesWiki),
@@ -860,6 +792,7 @@ fn build_menus(
             OpenProjectPage,
         ),
     ];
+    help_items.extend(extension_commands("help"));
     // Minimize and Zoom work on every platform (GPUI implements both for
     // macOS, Windows and Linux/X11/Wayland), so the Window menu stays.
     let window_items = vec![
@@ -944,6 +877,7 @@ fn build_menus(
                     MenuItem::separator(),
                     MenuItem::action(tr!("notes.menu.new"), NewNote),
                 ])
+                .chain(extension_commands("tools"))
                 .collect(),
             disabled: false,
         },
@@ -962,7 +896,7 @@ fn build_menus(
         },
         Menu {
             name: tr!("menu.view.title"),
-            items: vec![
+            items: [
                 MenuItem::action(tr!("menu.view.zoom_in"), ZoomIn),
                 MenuItem::action(tr!("menu.view.zoom_out"), ZoomOut),
                 MenuItem::separator(),
@@ -972,7 +906,14 @@ fn build_menus(
                 MenuItem::action(tr!("menu.view.show_downloaded_area"), ToggleDownloadedArea)
                     .checked(toggles.show_downloaded_area),
                 MenuItem::action(tr!("notes.menu.show"), ToggleNotes).checked(toggles.show_notes),
+                MenuItem::action(tr!("todo.menu.show"), crate::todo_ui::ToggleTodoList)
+                    .checked(toggles.show_todo),
                 MenuItem::action(tr!("notes.menu.refresh"), RefreshNotes),
+            ]
+            .into_iter()
+            // Overlays extensions draw over the map, with the app's own.
+            .chain(extension_commands("overlays"))
+            .chain([
                 MenuItem::separator(),
                 MenuItem::action(tr!("menu.view.show_labels"), ToggleLabels)
                     .checked(toggles.labels.labels),
@@ -983,16 +924,9 @@ fn build_menus(
                 MenuItem::action(tr!("menu.view.show_area_labels"), ToggleAreaLabels)
                     .checked(toggles.labels.area_labels),
                 MenuItem::separator(),
-                MenuItem::action(tr!("street_imagery.menu.mapillary"), ToggleMapillary)
-                    .checked(toggles.show_imagery[Provider::Mapillary.index()]),
-                MenuItem::action(tr!("street_imagery.menu.fotoshi"), ToggleFotoshi)
-                    .checked(toggles.show_imagery[Provider::Fotoshi.index()]),
-                MenuItem::action(tr!("street_imagery.menu.panoramax"), TogglePanoramax)
-                    .checked(toggles.show_imagery[Provider::Panoramax.index()]),
-                MenuItem::action(tr!("street_imagery.menu.refresh"), RefreshStreetImagery),
-                MenuItem::separator(),
                 MenuItem::action(tr!("menu.view.toggle_debug_overlay"), ToggleDebugOverlay),
-            ],
+            ])
+            .collect(),
             disabled: false,
         },
         Menu {
@@ -1115,7 +1049,7 @@ mod tests {
 
     #[gpui::test]
     fn shortcut_changes_preserve_find_input_editing(cx: &mut gpui::TestAppContext) {
-        use gpui::{AvailableSpace, VisualTestContext};
+        use gpui::{point, size, AppContext as _, AvailableSpace, VisualTestContext};
         use osm_gpui::ui::find_dialog::FindDialog;
 
         cx.update(gpui_component::init);
@@ -1155,7 +1089,7 @@ mod tests {
         // Customizing, customizing again, and resetting must all keep input
         // bindings. These are app-wide, including the Settings URL input.
         for settings in [&custom, &custom, &defaults] {
-            vcx.update(|_, cx| apply_keybindings_change(settings, cx));
+            vcx.update(|_, cx| replace_app_keybindings(settings, cx));
             vcx.simulate_keystrokes("a b backspace");
             assert_eq!(dialog.read_with(vcx, |d, cx| d.query_text(cx)), "a");
             vcx.simulate_keystrokes(select_all);
@@ -1190,8 +1124,8 @@ mod tests {
         custom
             .keybindings
             .insert("upload_osm".into(), "cmd-shift-up".into());
-        vcx.update(|_, cx| apply_keybindings_change(&defaults, cx));
-        vcx.update(|_, cx| apply_keybindings_change(&custom, cx));
+        vcx.update(|_, cx| replace_app_keybindings(&defaults, cx));
+        vcx.update(|_, cx| replace_app_keybindings(&custom, cx));
         let default_download = if cfg!(target_os = "macos") {
             "cmd-shift-d"
         } else {
@@ -1207,7 +1141,7 @@ mod tests {
         assert_eq!((downloads.get(), uploads.get()), (0, 0));
         vcx.simulate_keystrokes("cmd-shift-down cmd-shift-up");
         assert_eq!((downloads.get(), uploads.get()), (1, 1));
-        vcx.update(|_, cx| apply_keybindings_change(&defaults, cx));
+        vcx.update(|_, cx| replace_app_keybindings(&defaults, cx));
         vcx.simulate_keystrokes("cmd-shift-down cmd-shift-up");
         assert_eq!((downloads.get(), uploads.get()), (1, 1));
         vcx.simulate_keystrokes(default_download);
@@ -1282,7 +1216,7 @@ mod tests {
     fn the_view_menu_checkmarks_come_from_the_toggles_passed_in() {
         let on = view_checks(MenuToggles {
             show_notes: true,
-            show_imagery: [false, true, false],
+            show_todo: true,
             ..MenuToggles::default()
         });
         let off = view_checks(MenuToggles::default());
@@ -1294,17 +1228,10 @@ mod tests {
             checked(&off, tr!("notes.menu.show").to_string()),
             Some(false)
         );
-        assert_eq!(
-            checked(&on, tr!("street_imagery.menu.fotoshi").to_string()),
-            Some(true)
-        );
-        assert_eq!(
-            checked(&on, tr!("street_imagery.menu.mapillary").to_string()),
-            Some(false)
-        );
+        assert_eq!(checked(&on, tr!("todo.menu.show").to_string()), Some(true));
         // Building one menu leaves no state behind for the next.
         assert_eq!(
-            checked(&off, tr!("street_imagery.menu.fotoshi").to_string()),
+            checked(&off, tr!("todo.menu.show").to_string()),
             Some(false)
         );
     }
@@ -1431,27 +1358,6 @@ mod tests {
         .into_iter()
         .map(|m| fit_owned_menu(m.owned()))
         .collect()
-    }
-
-    #[test]
-    fn settings_opens_one_window_and_focuses_it_afterwards() {
-        assert_eq!(
-            settings_open_decision(false, None),
-            SettingsOpen::New { page: None }
-        );
-        assert_eq!(
-            settings_open_decision(false, Some(SettingsPage::Imagery)),
-            SettingsOpen::New {
-                page: Some(SettingsPage::Imagery)
-            }
-        );
-        assert_eq!(settings_open_decision(true, None), SettingsOpen::Focus);
-        assert_eq!(
-            settings_open_decision(true, Some(SettingsPage::Imagery)),
-            SettingsOpen::FocusAndShow {
-                page: SettingsPage::Imagery
-            }
-        );
     }
 
     /// No menu is over the limit unless it is a leaf without submenus.

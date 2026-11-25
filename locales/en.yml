@@ -288,6 +288,8 @@ limits:
 # Side panel sections. Preset and field labels shown inside them come from
 # the bundled iD tagging schema and are not translated here.
 panel:
+  extensions:
+    title: "Extensions"
   layers:
     title: "Layers"
     empty: "No layers yet"
@@ -449,14 +451,6 @@ geometry:
 
 settings:
   window_title: "Settings"
-  street_imagery:
-    group: "Street imagery"
-    mapillary_token: "Mapillary access token"
-    fotoshi_key: "Fotoshi API key"
-    fotoshi_key_description: "Optional. With a key, Fotoshi shows up to 100 photos per area instead of 20, and the lookup below becomes available. Create one at fotoshi.com/account/developer."
-    fotoshi_lookup: "Look up Fotoshi photos of the selected feature"
-    fotoshi_lookup_description: "When on, selecting an OpenStreetMap feature sends its id (such as w123) and your API key to Fotoshi to find photos of it. That tells Fotoshi what you are looking at, so it is off unless you turn it on. Needs an API key."
-    mapillary_token_description: "Mapillary needs an access token to show its photos. Create an application at mapillary.com/dashboard/developers and paste its client token here."
   save: "Save"
   language:
     group: "Language"
@@ -577,6 +571,8 @@ settings:
       not_a_number: "Enter a whole number of megabytes"
       clear_source: "Failed to clear %{source}: %{error}"
       clear_all: "Failed to clear cache: %{error}"
+  extensions:
+    title: "Extensions"
   shortcuts:
     title: "Keyboard Shortcuts"
     reset_all: "Reset All to Defaults"
@@ -925,6 +921,12 @@ action:
       relation_in_relation: "Can't delete relation %{relation}: it is a member of relation %{parent}"
       relation_empty: "Can't delete %{what} %{id}: it is the only member of relation %{relation}"
       restriction_role: "Can't delete %{what} %{id}: turn restriction %{relation} would be left without a '%{role}' member"
+  todo_add:
+    label: "Add to To-do List"
+    hint: "Select features that aren't on the to-do list yet"
+  todo_done:
+    label: "Mark To-do Done"
+    hint: "Select a feature that is on the to-do list"
   purge:
     label: "Purge"
     hint: "Select something to purge from the layer"
@@ -949,6 +951,38 @@ shortcut_category:
   actions: "Selection Actions"
 
 dialog:
+  extensions:
+    title: "Extensions"
+    search: "Search extensions"
+    tab_installed: "Installed (%{count})"
+    tab_installed_updates: "Installed (%{count}) · %{updates} update(s)"
+    tab_available: "Available"
+    install: "Install"
+    install_confirm: "Install %{name}"
+    cancel: "Cancel"
+    uninstall: "Uninstall"
+    uninstall_question: "Uninstall %{name}? Its settings and saved secrets stay on this computer, so installing it again restores them."
+    uninstall_confirm: "Uninstall %{name}"
+    update_to: "Update to %{version}"
+    rebuild: "Rebuild"
+    enable: "Turn on"
+    disable: "Turn off"
+    dev: "dev"
+    "off": "off"
+    by: "By %{authors}"
+    working: "Working…"
+    incompatible: "Needs a newer osm-gpui"
+    loading: "Loading the extension index…"
+    index_failed: "The extension index could not be read: %{detail}"
+    none_available: "Every extension in the index is installed."
+    none_installed: "No extensions are installed. See Available."
+    install_dev: "Install Dev Extension…"
+    refresh: "Refresh"
+    close: "Close"
+    no_settings: "Nothing to configure."
+    can_reach: "Can reach %{hosts} over HTTPS"
+    no_network: "No network access"
+    can_store_secrets: "May keep secrets in your keychain"
   cancel: "Cancel"
   no_matches: "No matches."
   upload:
@@ -1012,8 +1046,6 @@ dialog:
   sign_in:
     title: "Sign in to upload"
     body: "You need to sign in to an OpenStreetMap account to upload changes. Open Settings to sign in."
-    mapillary_title: "Mapillary access token needed"
-    mapillary_body: "Mapillary only serves photos to apps with an access token. Open Settings, then paste a token in Street imagery on the Imagery page. You can create one at mapillary.com/dashboard/developers."
     notes_title: "Sign in to work with notes"
     notes_body: "You need to sign in to OpenStreetMap to create, comment on, close or reopen notes. If you signed in before notes were supported, sign in again to grant the extra permission. Open Settings to sign in."
     open_settings: "Open Settings"
@@ -1506,39 +1538,6 @@ pmtiles:
       line: "Line"
       polygon: "Area"
 
-street_imagery:
-  menu:
-    mapillary: "Show Mapillary Photos"
-    fotoshi: "Show Fotoshi Photos"
-    panoramax: "Show Panoramax Photos"
-    refresh: "Refresh Street Imagery"
-  layer_name: "%{provider} photos"
-  state:
-    loading: "Loading %{provider} photos…"
-    loaded:
-      one: "%{provider}: 1 photo"
-      other: "%{provider}: %{count} photos"
-    zoom_in: "Zoom in to see %{provider} photos"
-    no_token: "Add a Mapillary access token in Settings to see Mapillary photos"
-    unauthorized: "Mapillary refused the access token; check it in Settings"
-    rate_limited: "%{provider} rate limit reached; try again later"
-    fetch_failed: "Could not load %{provider} photos: %{detail}"
-  object:
-    title:
-      one: "Fotoshi photo"
-      other: "Fotoshi photos (%{count})"
-    checking: "Checking Fotoshi for photos…"
-    photo: "Photo %{number}"
-  panel:
-    title: "Street photo"
-    close: "Close photo"
-    loading: "Loading photo…"
-    load_failed: "Could not load the photo"
-    open_in_browser: "Open on %{provider}"
-    captured: "Taken %{date}"
-    by: "by %{creator}"
-    license: "License: %{license}"
-    heading: "Facing %{degrees}°"
 
 notes:
   layer_name: "Notes"
@@ -1629,3 +1628,51 @@ revert:
     unavailable: "%{kind} %{id}: not available from the server"
     edited_locally: "%{kind} %{id}: has edits that are not uploaded yet"
     refused: "%{kind} %{id}: %{detail}"
+extensions:
+  street_imagery_moved:
+    title: "Street-level photos are extensions now"
+    body: "Mapillary, Fotoshi and Panoramax photos are no longer built in. Install the ones you use from Extensions > Manage Extensions…. A saved Mapillary access token or Fotoshi API key does not carry over: enter it again in the extension (Extensions > Mapillary > Access Token…, Extensions > Fotoshi > API Key and Lookup…)."
+  updates_available: "Extension updates available: %{count}. See Extensions > Manage Extensions…"
+  load_failed: "An extension failed to load: %{detail}"
+  not_installed: "Extension %{id} is not installed"
+  busy: "%{name} is still working…"
+  bad_area: "%{name} asked to download an area that is not valid"
+  open_url_failed: "Could not open %{url}: %{detail}"
+  pick_folder: "Choose an extension folder (with extension.toml)"
+  building: "Building the extension in %{path}…"
+  installed: "Installed %{name} %{version}"
+  install_failed: "Installing the extension failed: %{detail}"
+  uninstalled: "Uninstalled %{name}"
+  uninstall_failed: "Could not uninstall %{name}: %{detail}"
+  panel:
+    working: "Working…"
+    close: "Close"
+todo:
+  title: "To-do"
+  menu:
+    show: "To-do List"
+  count:
+    one: "%{count} left"
+    other: "%{count} left"
+  empty: "Nothing to do. Select features and choose Add to To-do List."
+  add_selected: "Add the selected features"
+  done_next: "Done & Next"
+  done: "Done"
+  close: "Hide the to-do list (View > To-do List brings it back)"
+  row:
+    gone: "%{kind} %{id} (no longer in the data)"
+  status:
+    added:
+      one: "Added %{count} feature to the to-do list (%{total} in all)"
+      other: "Added %{count} features to the to-do list (%{total} in all)"
+    already: "Already on the to-do list"
+    left:
+      one: "%{count} to-do left"
+      other: "%{count} to-dos left"
+    all_done: "To-do list done"
+    gone: "That feature is no longer in the data; mark it done to remove it"
+image_viewer:
+  close: "Close"
+  loading: "Loading the picture…"
+  failed: "The picture could not be loaded"
+  open: "Double-click to see it full size"
